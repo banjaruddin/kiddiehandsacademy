@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KiddieHands Fun Academy - Gesture Learning Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&family=Amiri:wght@700&display=swap" rel="stylesheet">
+    <!-- MediaPipe Hands & Camera Utils -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <style>
+        body {
+            font-family: 'Fredoka', sans-serif;
+            background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+            overflow-x: hidden;
+            user-select: none;
+        }
+        .jawi-font {
+            font-family: 'Amiri', serif;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            border: 3px solid rgba(255, 255, 255, 0.9);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+        }
+        #virtual-cursor {
+            position: fixed;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 9999;
+            transform: translate(-50%, -50%);
+            transition: width 0.15s, height 0.15s, background-color 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+        .cursor-open {
+            background: rgba(59, 130, 246, 0.35);
+            border: 3px solid #2563eb;
+            box-shadow: 0 0 15px rgba(37, 99, 235, 0.5);
+        }
+        .cursor-pinch {
+            width: 28px !important;
+            height: 28px !important;
+            background: rgba(239, 68, 68, 0.7);
+            border: 3px solid #dc2626;
+            box-shadow: 0 0 20px rgba(220, 38, 38, 0.8);
+        }
+        .draggable-tile {
+            transition: transform 0.1s ease, box-shadow 0.2s ease;
+            cursor: grab;
+        }
+        .draggable-tile.grabbed {
+            position: fixed !important;
+            z-index: 5000 !important;
+            transform: translate(-50%, -50%) scale(1.15) !important;
+            box-shadow: 0 15px 30px rgba(0,0,0,0.25) !important;
+            pointer-events: none;
+        }
+        .drop-zone {
+            transition: all 0.2s ease;
+        }
+        .drop-zone.highlight {
+            transform: scale(1.08);
+            border-color: #10b981 !important;
+            background-color: rgba(16, 185, 129, 0.15) !important;
+        }
+        @keyframes pop {
+            0% { transform: scale(0.8); }
+            50% { transform: scale(1.15); }
+            100% { transform: scale(1); }
+        }
+        .animate-pop {
+            animation: pop 0.4s ease forwards;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between p-4">
+
+    <!-- Virtual Hand Cursor -->
+    <div id="virtual-cursor" class="cursor-open hidden">✋</div>
+
+    <!-- Confetti Canvas -->
+    <canvas id="confetti-canvas" class="fixed inset-0 pointer-events-none z-50"></canvas>
+
+    <!-- Header -->
+    <header class="glass-panel rounded-3xl px-6 py-4 flex flex-wrap items-center justify-between gap-4 max-w-6xl w-full mx-auto">
+        <div class="flex items-center gap-3">
+            <span class="text-4xl">🎨</span>
+            <div>
+                <h1 class="text-2xl md:text-3xl font-bold text-indigo-600">KiddieHands Academy</h1>
+                <p class="text-xs md:text-sm text-gray-600">Pinch & Drop with Camera or Mouse!</p>
+            </div>
+        </div>
+
+        <!-- Mode Navigation -->
+        <nav class="flex flex-wrap gap-2">
+            <button onclick="switchMode('alphabet')" id="btn-alphabet" class="mode-btn px-4 py-2 rounded-2xl font-bold text-white bg-pink-500 shadow-md hover:scale-105 transition">
+                🔤 ABC Tracing
+            </button>
+            <button onclick="switchMode('jawi')" id="btn-jawi" class="mode-btn px-4 py-2 rounded-2xl font-bold text-indigo-700 bg-white hover:bg-indigo-50 shadow-sm hover:scale-105 transition">
+                🕌 Jawi (ا ب ت)
+            </button>
+            <button onclick="switchMode('math')" id="btn-math" class="mode-btn px-4 py-2 rounded-2xl font-bold text-indigo-700 bg-white hover:bg-indigo-50 shadow-sm hover:scale-105 transition">
+                🔢 Math Drop
+            </button>
+        </nav>
+
+        <!-- Camera & Score Controls -->
+        <div class="flex items-center gap-4">
+            <div class="bg-yellow-100 border-2 border-yellow-400 px-4 py-1.5 rounded-2xl flex items-center gap-2">
+                <span class="text-2xl">⭐</span>
+                <span id="score-display" class="text-xl font-bold text-yellow-700">0</span>
+            </div>
+            <button id="camera-toggle-btn" onclick="toggleCamera()" class="px-4 py-2 rounded-2xl font-bold text-white bg-emerald-500 hover:bg-emerald-600 shadow-md flex items-center gap-2 transition">
+                <span>📷</span>
+                <span id="camera-btn-text">Start Camera</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Game Area -->
+    <main class="max-w-6xl w-full mx-auto my-4 grid grid-cols-1 lg:grid-cols-12 gap-6 flex-grow items-center">
+        
+        <!-- Left/Center Game Stage (8 cols) -->
+        <div class="lg:col-span-8 glass-panel rounded-3xl p-6 flex flex-col items-center justify-center min-h-[450px] relative">
+            
+            <!-- Instruction Banner -->
+            <div id="instruction-banner" class="mb-4 text-center">
+                <h2 id="game-title" class="text-2xl font-bold text-gray-800">Trace the Letter!</h2>
+                <p id="game-subtitle" class="text-gray-600">Pinch your thumb & index finger to draw, or use your mouse!</p>
+            </div>
+
+            <!-- STAGE 1: ALPHABET TRACING -->
+            <div id="stage-alphabet" class="w-full flex flex-col items-center">
+                <div class="relative w-[320px] h-[320px] md:w-[360px] md:h-[360px] bg-white rounded-3xl border-4 border-dashed border-pink-300 shadow-inner flex items-center justify-center overflow-hidden">
+                    <canvas id="trace-guide-canvas" width="360" height="360" class="absolute inset-0 w-full h-full pointer-events-none"></canvas>
+                    <canvas id="trace-draw-canvas" width="360" height="360" class="absolute inset-0 w-full h-full cursor-crosshair"></canvas>
+                </div>
+                <div class="mt-5 flex gap-3">
+                    <button onclick="clearTrace()" class="px-5 py-2.5 rounded-2xl bg-gray-200 hover:bg-gray-300 font-bold text-gray-700 transition">🔄 Clear</button>
+                    <button onclick="checkTraceCompletion()" class="px-6 py-2.5 rounded-2xl bg-pink-500 hover:bg-pink-600 font-bold text-white shadow-md transition">✅ Done / Next Letter</button>
+                </div>
+            </div>
+
+            <!-- STAGE 2: JAWI MATCHING (PICK & DROP) -->
+            <div id="stage-jawi" class="w-full hidden flex-col items-center">
+                <!-- Drop Target -->
+                <div id="jawi-drop-zone" class="drop-zone w-48 h-48 rounded-3xl border-4 border-dashed border-indigo-400 bg-indigo-50/70 flex flex-col items-center justify-center mb-8 p-4">
+                    <span class="text-sm font-semibold text-indigo-400 uppercase tracking-wider mb-1">Drop Here</span>
+                    <span id="jawi-target-rumi" class="text-4xl font-bold text-indigo-700">ALIF</span>
+                    <span id="jawi-hint" class="text-xs text-gray-500 mt-2">Match the Jawi letter</span>
+                </div>
+
+                <!-- Draggable Jawi Options -->
+                <div id="jawi-options" class="flex flex-wrap justify-center gap-6">
+                    <!-- Populated via JS -->
+                </div>
+            </div>
+
+            <!-- STAGE 3: MATHEMATICS (PICK & DROP) -->
+            <div id="stage-math" class="w-full hidden flex-col items-center">
+                <!-- Equation & Drop Target -->
+                <div class="flex items-center justify-center gap-4 md:gap-6 mb-8 flex-wrap">
+                    <div class="bg-amber-100 border-4 border-amber-300 rounded-3xl px-8 py-6 text-center shadow-sm">
+                        <div id="math-visuals" class="text-3xl mb-2">🍎🍎 + 🍎</div>
+                        <div id="math-equation" class="text-5xl font-bold text-amber-800">2 + 1 = ?</div>
+                    </div>
+
+                    <div id="math-drop-zone" class="drop-zone w-36 h-36 rounded-3xl border-4 border-dashed border-emerald-400 bg-emerald-50/70 flex flex-col items-center justify-center">
+                        <span class="text-xs font-bold text-emerald-500 uppercase">Answer</span>
+                        <span class="text-4xl font-bold text-emerald-300">?</span>
+                    </div>
+                </div>
+
+                <!-- Draggable Number Tiles -->
+                <div id="math-options" class="flex flex-wrap justify-center gap-6">
+                    <!-- Populated via JS -->
+                </div>
+            </div>
+
+            <!-- Feedback Toast -->
+            <div id="feedback-toast" class="hidden absolute top-4 right-4 px-5 py-3 rounded-2xl font-bold text-white text-lg shadow-lg animate-pop">
+                Awesome! 🎉
+            </div>
+        </div>
+
+        <!-- Right Sidebar: Camera Feed & Gesture Guide (4 cols) -->
+        <div class="lg:col-span-4 flex flex-col gap-4">
+            <!-- Camera Preview Box -->
+            <div class="glass-panel rounded-3xl p-4 flex flex-col items-center">
+                <div class="w-full flex justify-between items-center mb-2">
+                    <span class="font-bold text-gray-700 flex items-center gap-1.5">
+                        <span id="cam-status-dot" class="w-3 h-3 rounded-full bg-red-500 inline-block"></span>
+                        Camera Hand Tracker
+                    </span>
+                    <span id="gesture-state-badge" class="text-xs font-bold px-2.5 py-1 rounded-full bg-gray-200 text-gray-600">Camera Off</span>
+                </div>
+
+                <div class="relative w-full aspect-video bg-gray-900 rounded-2xl overflow-hidden border-2 border-gray-300 flex items-center justify-center">
+                    <video id="input-video" class="hidden" playsinline></video>
+                    <canvas id="output-canvas" width="480" height="360" class="w-full h-full object-cover transform -scale-x-100"></canvas>
+                    <div id="camera-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-white text-center p-4">
+                        <span class="text-4xl mb-2">📷</span>
+                        <p class="text-sm font-medium">Click <b>"Start Camera"</b> above to use hand gestures!</p>
+                        <p class="text-xs text-gray-400 mt-1">(Requires HTTPS or Localhost)</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- How to Play Card -->
+            <div class="glass-panel rounded-3xl p-5">
+                <h3 class="font-bold text-lg text-indigo-700 mb-3">🖐️ Hand Gesture Guide</h3>
+                <ul class="space-y-2.5 text-sm text-gray-700">
+                    <li class="flex items-start gap-2.5">
+                        <span class="text-xl">✋</span>
+                        <div><b>Open Hand:</b> Move your index finger to guide the blue cursor across the screen.</div>
+                    </li>
+                    <li class="flex items-start gap-2.5">
+                        <span class="text-xl">🤏</span>
+                        <div><b>Pinch (Thumb + Index):</b> Cursor turns red! Hold pinch to <b>draw/trace</b> or <b>pick up</b> a card.</div>
+                    </li>
+                    <li class="flex items-start gap-2.5">
+                        <span class="text-xl">🖐️</span>
+                        <div><b>Release Fingers:</b> Open your fingers over the target box to <b>drop</b> your answer!</div>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="text-center text-xs text-gray-600 py-2">
+        Ready for GitHub Pages • Built with MediaPipe Hands & HTML5 Canvas
+    </footer>
+
+    <script>
+        // ================= SOUND EFFECTS (Web Audio API) =================
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playTone(freq, type = 'sine', duration = 0.2) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        }
+        function playSuccessSound() {
+            playTone(523.25, 'triangle', 0.15); // C5
+            setTimeout(() => playTone(659.25, 'triangle', 0.15), 120); // E5
+            setTimeout(() => playTone(783.99, 'triangle', 0.3), 240); // G5
+        }
+        function playErrorSound() {
+            playTone(220, 'sawtooth', 0.25);
+        }
+        function playPopSound() {
+            playTone(440, 'sine', 0.08);
+        }
+
+        // ================= CONFETTI EFFECT =================
+        const confettiCanvas = document.getElementById('confetti-canvas');
+        const confettiCtx = confettiCanvas.getContext('2d');
+        let confettiParticles = [];
+
+        function resizeConfetti() {
+            confettiCanvas.width = window.innerWidth;
+            confettiCanvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeConfetti);
+        resizeConfetti();
+
+        function launchConfetti() {
+            const colors = ['#f43f5e', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'];
+            for (let i = 0; i < 60; i++) {
+                confettiParticles.push({
+                    x: window.innerWidth / 2,
+                    y: window.innerHeight / 2,
+                    vx: (Math.random() - 0.5) * 16,
+                    vy: (Math.random() - 0.7) * 16,
+                    size: Math.random() * 8 + 5,
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    life: 80
+                });
+            }
+        }
+
+        function updateConfetti() {
+            confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+            confettiParticles.forEach((p, idx) => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.35; // gravity
+                p.life--;
+                confettiCtx.fillStyle = p.color;
+                confettiCtx.fillRect(p.x, p.y, p.size, p.size);
+                if (p.life <= 0) confettiParticles.splice(idx, 1);
+            });
+            requestAnimationFrame(updateConfetti);
+        }
+        updateConfetti();
+
+        // ================= GAME STATE =================
+        let currentMode = 'alphabet';
+        let score = 0;
+
+        function addScore(points) {
+            score += points;
+            document.getElementById('score-display').innerText = score;
+            playSuccessSound();
+            launchConfetti();
+            showToast("Great Job! +" + points + " ⭐", "bg-emerald-500");
+        }
+
+        function showToast(msg, bgClass) {
+            const toast = document.getElementById('feedback-toast');
+            toast.innerText = msg;
+            toast.className = `absolute top-4 right-4 px-5 py-3 rounded-2xl font-bold text-white text-lg shadow-lg animate-pop ${bgClass}`;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 1800);
+        }
+
+        function switchMode(mode) {
+            currentMode = mode;
+            playPopSound();
+
+            // Update buttons
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.remove('bg-pink-500', 'text-white', 'shadow-md');
+                btn.classList.add('bg-white', 'text-indigo-700');
+            });
+            const activeBtn = document.getElementById('btn-' + mode);
+            activeBtn.classList.remove('bg-white', 'text-indigo-700');
+            activeBtn.classList.add('bg-pink-500', 'text-white', 'shadow-md');
+
+            // Hide all stages
+            document.getElementById('stage-alphabet').classList.add('hidden');
+            document.getElementById('stage-jawi').classList.add('hidden');
+            document.getElementById('stage-math').classList.add('hidden');
+
+            if (mode === 'alphabet') {
+                document.getElementById('stage-alphabet').classList.remove('hidden');
+                document.getElementById('stage-alphabet').classList.add('flex');
+                document.getElementById('game-title').innerText = "Trace the Alphabet!";
+                document.getElementById('game-subtitle').innerText = "Pinch thumb & index finger (or hold mouse) to trace the letter.";
+                loadAlphabetLevel();
+            } else if (mode === 'jawi') {
+                document.getElementById('stage-jawi').classList.remove('hidden');
+                document.getElementById('stage-jawi').classList.add('flex');
+                document.getElementById('game-title').innerText = "Match the Jawi Letter!";
+                document.getElementById('game-subtitle').innerText = "Pinch a Jawi card and drop it into the matching box.";
+                loadJawiLevel();
+            } else if (mode === 'math') {
+                document.getElementById('stage-math').classList.remove('hidden');
+                document.getElementById('stage-math').classList.add('flex');
+                document.getElementById('game-title').innerText = "Fun Math Pick & Drop!";
+                document.getElementById('game-subtitle').innerText = "Count the fruits, pinch the right number, and drop it in the box!";
+                loadMathLevel();
+            }
+        }
+
+        // ================= MODE 1: ALPHABET TRACING =================
+        const alphabetList = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'M', 'O', 'S'];
+        let alphaIdx = 0;
+        const guideCanvas = document.getElementById('trace-guide-canvas');
+        const guideCtx = guideCanvas.getContext('2d');
+        const drawCanvas = document.getElementById('trace-draw-canvas');
+        const drawCtx = drawCanvas.getContext('2d');
+        let isDrawing = false;
+        let drawnPixels = 0;
+
+        function loadAlphabetLevel() {
+            const letter = alphabetList[alphaIdx % alphabetList.length];
+            guideCtx.clearRect(0, 0, 360, 360);
+            drawCtx.clearRect(0, 0, 360, 360);
+            drawnPixels = 0;
+
+            // Draw dashed guide letter
+            guideCtx.font = "bold 250px Fredoka";
+            guideCtx.textAlign = "center";
+            guideCtx.textBaseline = "middle";
+            guideCtx.strokeStyle = "#f472b6";
+            guideCtx.lineWidth = 6;
+            guideCtx.setLineDash([12, 10]);
+            guideCtx.strokeText(letter, 180, 195);
+
+            guideCtx.fillStyle = "rgba(244, 114, 182, 0.12)";
+            guideCtx.fillText(letter, 180, 195);
+        }
+
+        function clearTrace() {
+            drawCtx.clearRect(0, 0, 360, 360);
+            drawnPixels = 0;
+            playPopSound();
+        }
+
+        function checkTraceCompletion() {
+            if (drawnPixels < 25) {
+                showToast("Trace the letter first! ✏️", "bg-amber-500");
+                playErrorSound();
+                return;
+            }
+            addScore(10);
+            alphaIdx++;
+            loadAlphabetLevel();
+        }
+
+        function drawOnTraceCanvas(clientX, clientY, isStart) {
+            const rect = drawCanvas.getBoundingClientRect();
+            const scaleX = drawCanvas.width / rect.width;
+            const scaleY = drawCanvas.height / rect.height;
+            const x = (clientX - rect.left) * scaleX;
+            const y = (clientY - rect.top) * scaleY;
+
+            if (x < 0 || x > 360 || y < 0 || y > 360) return;
+
+            drawCtx.lineCap = "round";
+            drawCtx.lineJoin = "round";
+            drawCtx.lineWidth = 22;
+            drawCtx.strokeStyle = "#ec4899";
+
+            if (isStart) {
+                drawCtx.beginPath();
+                drawCtx.moveTo(x, y);
+            } else {
+                drawCtx.lineTo(x, y);
+                drawCtx.stroke();
+                drawnPixels++;
+            }
+        }
+
+        // Mouse fallback for tracing
+        drawCanvas.addEventListener('mousedown', (e) => {
+            isDrawing = true;
+            drawOnTraceCanvas(e.clientX, e.clientY, true);
+        });
+        drawCanvas.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+            drawOnTraceCanvas(e.clientX, e.clientY, false);
+        });
+        window.addEventListener('mouseup', () => { isDrawing = false; });
+
+        // ================= MODE 2: JAWI MATCHING =================
+        const jawiData = [
+            { rumi: 'ALIF', jawi: 'ا' },
+            { rumi: 'BA', jawi: 'ب' },
+            { rumi: 'TA', jawi: 'ت' },
+            { rumi: 'THA', jawi: 'ث' },
+            { rumi: 'JIM', jawi: 'ج' },
+            { rumi: 'HA', jawi: 'ح' },
+            { rumi: 'DAL', jawi: 'د' },
+            { rumi: 'SIN', jawi: 'س' },
+            { rumi: 'MIM', jawi: 'م' },
+            { rumi: 'NUN', jawi: 'ن' },
+            { rumi: 'WAU', jawi: 'و' },
+            { rumi: 'YA', jawi: 'ي' }
+        ];
+        let currentJawiTarget = null;
+
+        function loadJawiLevel() {
+            const shuffled = [...jawiData].sort(() => 0.5 - Math.random());
+            const choices = shuffled.slice(0, 3);
+            currentJawiTarget = choices[Math.floor(Math.random() * choices.length)];
+
+            document.getElementById('jawi-target-rumi').innerText = currentJawiTarget.rumi;
+
+            const container = document.getElementById('jawi-options');
+            container.innerHTML = '';
+
+            choices.forEach(item => {
+                const card = document.createElement('div');
+                card.className = 'draggable-tile jawi-font w-28 h-28 bg-white border-4 border-indigo-300 rounded-3xl flex items-center justify-center text-6xl text-indigo-800 shadow-md select-none';
+                card.innerText = item.jawi;
+                card.dataset.value = item.jawi;
+                attachMouseDrag(card, 'jawi-drop-zone', handleJawiDrop);
+                container.appendChild(card);
+            });
+        }
+
+        function handleJawiDrop(val) {
+            if (val === currentJawiTarget.jawi) {
+                addScore(15);
+                loadJawiLevel();
+            } else {
+                playErrorSound();
+                showToast("Try again! That's not " + currentJawiTarget.rumi, "bg-rose-500");
+            }
+        }
+
+        // ================= MODE 3: MATHEMATICS =================
+        const fruits = ['🍎', '🍌', '🍓', '🍊', '🍇'];
+        let currentMathAnswer = 0;
+
+        function loadMathLevel() {
+            const a = Math.floor(Math.random() * 5) + 1;
+            const b = Math.floor(Math.random() * 5) + 1;
+            currentMathAnswer = a + b;
+            const fruit = fruits[Math.floor(Math.random() * fruits.length)];
+
+            document.getElementById('math-visuals').innerText = `${fruit.repeat(a)} + ${fruit.repeat(b)}`;
+            document.getElementById('math-equation').innerText = `${a} + ${b} = ?`;
+
+            // Generate 3 unique options
+            let opts = new Set([currentMathAnswer]);
+            while (opts.size < 3) {
+                let wrong = currentMathAnswer + (Math.floor(Math.random() * 5) - 2);
+                if (wrong > 0 && wrong !== currentMathAnswer) opts.add(wrong);
+            }
+            const shuffledOpts = Array.from(opts).sort(() => 0.5 - Math.random());
+
+            const container = document.getElementById('math-options');
+            container.innerHTML = '';
+
+            shuffledOpts.forEach(num => {
+                const card = document.createElement('div');
+                card.className = 'draggable-tile w-28 h-28 bg-white border-4 border-emerald-400 rounded-3xl flex items-center justify-center text-5xl font-bold text-emerald-700 shadow-md select-none';
+                card.innerText = num;
+                card.dataset.value = num;
+                attachMouseDrag(card, 'math-drop-zone', handleMathDrop);
+                container.appendChild(card);
+            });
+        }
+
+        function handleMathDrop(val) {
+            if (parseInt(val) === currentMathAnswer) {
+                addScore(15);
+                loadMathLevel();
+            } else {
+                playErrorSound();
+                showToast("Oops! Count again!", "bg-rose-500");
+            }
+        }
+
+        // ================= UNIVERSAL PICK & DROP ENGINE (MOUSE + HAND GESTURE) =================
+        let grabbedElement = null;
+
+        function attachMouseDrag(el, dropZoneId, onDropCallback) {
+            el.addEventListener('mousedown', (e) => {
+                startGrab(el, e.clientX, e.clientY);
+
+                const onMouseMove = (moveEvent) => {
+                    moveGrab(moveEvent.clientX, moveEvent.clientY, dropZoneId);
+                };
+
+                const onMouseUp = (upEvent) => {
+                    window.removeEventListener('mousemove', onMouseMove);
+                    window.removeEventListener('mouseup', onMouseUp);
+                    endGrab(upEvent.clientX, upEvent.clientY, dropZoneId, onDropCallback);
+                };
+
+                window.addEventListener('mousemove', onMouseMove);
+                window.addEventListener('mouseup', onMouseUp);
+            });
+        }
+
+        function startGrab(el, x, y) {
+            if (grabbedElement) return;
+            grabbedElement = el;
+            grabbedElement.classList.add('grabbed');
+            grabbedElement.style.left = x + 'px';
+            grabbedElement.style.top = y + 'px';
+            playPopSound();
+        }
+
+        function moveGrab(x, y, dropZoneId) {
+            if (!grabbedElement) return;
+            grabbedElement.style.left = x + 'px';
+            grabbedElement.style.top = y + 'px';
+
+            const dz = document.getElementById(dropZoneId);
+            if (dz && isPointInside(x, y, dz.getBoundingClientRect())) {
+                dz.classList.add('highlight');
+            } else if (dz) {
+                dz.classList.remove('highlight');
+            }
+        }
+
+        function endGrab(x, y, dropZoneId, onDropCallback) {
+            if (!grabbedElement) return;
+            const dz = document.getElementById(dropZoneId);
+            const val = grabbedElement.dataset.value;
+
+            grabbedElement.classList.remove('grabbed');
+            grabbedElement.style.left = '';
+            grabbedElement.style.top = '';
+            grabbedElement = null;
+
+            if (dz) {
+                dz.classList.remove('highlight');
+                if (isPointInside(x, y, dz.getBoundingClientRect())) {
+                    onDropCallback(val);
+                }
+            }
+        }
+
+        function isPointInside(x, y, rect) {
+            return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+        }
+
+        // ================= MEDIAPIPE CAMERA & HAND GESTURE TRACKING =================
+        const videoElement = document.getElementById('input-video');
+        const canvasElement = document.getElementById('output-canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const virtualCursor = document.getElementById('virtual-cursor');
+        let cameraInstance = null;
+        let isCameraRunning = false;
+        let wasPinching = false;
+
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+
+        hands.onResults(onHandResults);
+
+        function onHandResults(results) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, { color: '#10b981', lineWidth: 3 });
+                drawLandmarks(canvasCtx, landmarks, { color: '#f43f5e', lineWidth: 1, radius: 4 });
+
+                // Index finger tip (8) & Thumb tip (4)
+                const indexTip = landmarks[8];
+                const thumbTip = landmarks[4];
+
+                // Mirror X coordinate for natural screen interaction
+                const screenX = (1 - indexTip.x) * window.innerWidth;
+                const screenY = indexTip.y * window.innerHeight;
+
+                // Calculate pinch distance
+                const dx = indexTip.x - thumbTip.x;
+                const dy = indexTip.y - thumbTip.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const isPinching = distance < 0.055;
+
+                // Update Virtual Cursor
+                virtualCursor.classList.remove('hidden');
+                virtualCursor.style.left = screenX + 'px';
+                virtualCursor.style.top = screenY + 'px';
+
+                const badge = document.getElementById('gesture-state-badge');
+                if (isPinching) {
+                    virtualCursor.classList.remove('cursor-open');
+                    virtualCursor.classList.add('cursor-pinch');
+                    virtualCursor.innerText = '🤏';
+                    badge.innerText = 'Pinching (Grab/Draw)';
+                    badge.className = 'text-xs font-bold px-2.5 py-1 rounded-full bg-rose-100 text-rose-700';
+                } else {
+                    virtualCursor.classList.remove('cursor-pinch');
+                    virtualCursor.classList.add('cursor-open');
+                    virtualCursor.innerText = '✋';
+                    badge.innerText = 'Hand Open (Move)';
+                    badge.className = 'text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700';
+                }
+
+                // Handle Gesture Interactions per Game Mode
+                handleGestureAction(screenX, screenY, isPinching, wasPinching);
+                wasPinching = isPinching;
+            } else {
+                virtualCursor.classList.add('hidden');
+            }
+            canvasCtx.restore();
+        }
+
+        function handleGestureAction(x, y, isPinching, prevPinching) {
+            if (currentMode === 'alphabet') {
+                if (isPinching) {
+                    drawOnTraceCanvas(x, y, !prevPinching);
+                }
+            } else if (currentMode === 'jawi' || currentMode === 'math') {
+                const dropZoneId = currentMode === 'jawi' ? 'jawi-drop-zone' : 'math-drop-zone';
+                const callback = currentMode === 'jawi' ? handleJawiDrop : handleMathDrop;
+
+                if (isPinching && !prevPinching) {
+                    // Check if pinching over any draggable card
+                    const tiles = document.querySelectorAll('.draggable-tile');
+                    tiles.forEach(tile => {
+                        if (isPointInside(x, y, tile.getBoundingClientRect())) {
+                            startGrab(tile, x, y);
+                        }
+                    });
+                } else if (isPinching && grabbedElement) {
+                    moveGrab(x, y, dropZoneId);
+                } else if (!isPinching && prevPinching && grabbedElement) {
+                    endGrab(x, y, dropZoneId, callback);
+                }
+            }
+        }
+
+        async function toggleCamera() {
+            const btnText = document.getElementById('camera-btn-text');
+            const dot = document.getElementById('cam-status-dot');
+            const placeholder = document.getElementById('camera-placeholder');
+
+            if (!isCameraRunning) {
+                btnText.innerText = "Loading...";
+                try {
+                    cameraInstance = new Camera(videoElement, {
+                        onFrame: async () => {
+                            await hands.send({ image: videoElement });
+                        },
+                        width: 480,
+                        height: 360
+                    });
+                    await cameraInstance.start();
+                    isCameraRunning = true;
+                    btnText.innerText = "Stop Camera";
+                    dot.classList.remove('bg-red-500');
+                    dot.classList.add('bg-emerald-500', 'animate-pulse');
+                    placeholder.classList.add('hidden');
+                } catch (err) {
+                    alert("Camera access denied or unavailable. Please ensure you allow camera permission and run on HTTPS or localhost.");
+                    btnText.innerText = "Start Camera";
+                }
+            } else {
+                if (cameraInstance) cameraInstance.stop();
+                isCameraRunning = false;
+                btnText.innerText = "Start Camera";
+                dot.classList.remove('bg-emerald-500', 'animate-pulse');
+                dot.classList.add('bg-red-500');
+                placeholder.classList.remove('hidden');
+                virtualCursor.classList.add('hidden');
+                document.getElementById('gesture-state-badge').innerText = "Camera Off";
+            }
+        }
+
+        // Initialize first mode
+        switchMode('alphabet');
+    </script>
+</body>
+</html>
